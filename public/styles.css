@@ -162,8 +162,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:fo
 /* Main content */
 .content{flex:1;min-width:0;}
 .card{
+  position:relative;
   background:var(--paper-3);border:1px solid var(--line);border-radius:4px;
   padding:34px 36px;box-shadow:var(--shadow);
+}
+.watermark-overlay{
+  position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:2;
+  display:flex;flex-direction:column;justify-content:space-around;align-items:center;
+  transform:rotate(-24deg) scale(1.35);
+}
+.watermark-overlay .wm-row{
+  font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:12.5px;letter-spacing:0.05em;
+  color:var(--ink);opacity:0.055;white-space:nowrap;
 }
 .stage-head{margin-bottom:6px;}
 .stage-eyebrow{

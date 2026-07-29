@@ -196,14 +196,49 @@ function onSecureKeydown(e){
     recordViolation('devtools', 'Developer tools are disabled during this section');
     return false;
   }
+  // Best-effort only: most browsers (notably Chrome/Windows) never deliver a
+  // keydown event for PrintScreen at all, so this can't reliably prevent or
+  // even detect a screenshot — it only catches it on the browsers/OSes that
+  // do expose the key. The watermark is the real mitigation for screenshots.
+  if(k === 'printscreen'){
+    recordViolation('screenshot_key', 'A screenshot key press was detected and logged');
+  }
 }
 function onSecureCopyCut(e){ e.preventDefault(); recordViolation('copy', 'Copying question content is disabled during this section'); }
 function onSecurePaste(e){ e.preventDefault(); recordViolation('paste', 'Pasting is disabled — please type your own response'); }
 function onSecureContextMenu(e){ e.preventDefault(); recordViolation('contextmenu', 'Right-click is disabled during this section'); }
+
+/* Tab-switch / minimize detection.
+   Only document.visibilitychange is trustworthy here — it fires exclusively
+   when the actual browser tab is hidden (switched away, minimized, screen
+   locked). We deliberately do NOT use window "blur", because blur fires on
+   completely ordinary things (clicking an address bar, a browser extension)
+   and was flagging candidates for routine, harmless actions.
+   On top of that we add:
+   - a debounce: the tab must stay hidden for HIDE_CONFIRM_MS before it counts,
+     so a brief flicker never triggers a flag.
+   - a cooldown: once a violation fires, we ignore further hide events for
+     VIOLATION_COOLDOWN_MS so one switch-away doesn't get logged multiple times. */
+const HIDE_CONFIRM_MS = 62000; // 1 minute 2 seconds
+const VIOLATION_COOLDOWN_MS = 10000; // 10 seconds
+let hideConfirmTimer = null;
+let lastViolationAt = 0;
+
 function onSecureVisibility(){
-  if(document.hidden){ recordViolation('tabswitch', 'Leaving this tab/window during a secured section is flagged'); }
+  if(document.hidden){
+    if(hideConfirmTimer) clearTimeout(hideConfirmTimer);
+    hideConfirmTimer = setTimeout(() => {
+      hideConfirmTimer = null;
+      if(!document.hidden || !secureActive) return; // came back before it was confirmed
+      const now = Date.now();
+      if(now - lastViolationAt < VIOLATION_COOLDOWN_MS) return; // still in cooldown from the last flag
+      lastViolationAt = now;
+      recordViolation('tabswitch', 'Leaving this tab or window during a secured section is flagged');
+    }, HIDE_CONFIRM_MS);
+  } else {
+    if(hideConfirmTimer){ clearTimeout(hideConfirmTimer); hideConfirmTimer = null; }
+  }
 }
-function onSecureBlur(){ recordViolation('blur', 'Switching away from the assessment window is flagged'); }
 function onSecureBeforeUnload(e){
   if(!secureActive) return;
   e.preventDefault();
@@ -214,26 +249,39 @@ function onSecureBeforeUnload(e){
 function attachSecurity(stageId){
   secureActive = true;
   secureStageId = stageId;
+  lastViolationAt = 0;
   document.addEventListener('keydown', onSecureKeydown, true);
   document.addEventListener('copy', onSecureCopyCut, true);
   document.addEventListener('cut', onSecureCopyCut, true);
   document.addEventListener('paste', onSecurePaste, true);
   document.addEventListener('contextmenu', onSecureContextMenu, true);
   document.addEventListener('visibilitychange', onSecureVisibility, true);
-  window.addEventListener('blur', onSecureBlur, true);
   window.addEventListener('beforeunload', onSecureBeforeUnload);
 }
 function detachSecurity(){
   secureActive = false;
   secureStageId = null;
+  if(hideConfirmTimer){ clearTimeout(hideConfirmTimer); hideConfirmTimer = null; }
   document.removeEventListener('keydown', onSecureKeydown, true);
   document.removeEventListener('copy', onSecureCopyCut, true);
   document.removeEventListener('cut', onSecureCopyCut, true);
   document.removeEventListener('paste', onSecurePaste, true);
   document.removeEventListener('contextmenu', onSecureContextMenu, true);
   document.removeEventListener('visibilitychange', onSecureVisibility, true);
-  window.removeEventListener('blur', onSecureBlur, true);
   window.removeEventListener('beforeunload', onSecureBeforeUnload);
+}
+
+/* Watermark: browsers cannot block screenshots or a phone camera pointed at
+   the screen — no website can. What this does instead is make a leaked
+   screenshot traceable: every secured stage is stamped, faintly and
+   repeatedly, with the candidate's name, ID, and a live timestamp. It won't
+   stop a capture, but it removes any deniability about where it came from
+   and discourages sharing since it's tied to one person. */
+function renderWatermark(){
+  if(!candidate) return '';
+  const stamp = `${candidate.candidateId} · ${candidate.name} · ${new Date().toLocaleString()}`;
+  const row = `<span class="wm-row">${escapeHtml(stamp)}&emsp;&emsp;${escapeHtml(stamp)}&emsp;&emsp;${escapeHtml(stamp)}</span>`;
+  return `<div class="watermark-overlay">${Array(7).fill(row).join('')}</div>`;
 }
 
 function renderSecureBanner(timeLabel, timeLow){
@@ -565,7 +613,7 @@ function renderQuizStage(s){
         <p class="stage-desc">This is a secured, timed section: ${quiz.questions.length} questions, one at a time, ${SECONDS_PER_QUESTION} seconds each. Once you start a question you cannot go back to change an earlier answer, and you cannot preview later questions. Copying, pasting, right-click, and switching tabs are disabled and logged.</p>
         <div class="gate-notice">
           <span>🔒</span>
-          <span>Find a quiet, uninterrupted space before you begin. Leaving this window or exceeding ${MAX_VIOLATIONS_BEFORE_LOCK} flags will lock the section until a recruiter reviews it.</span>
+          <span>Find a quiet, uninterrupted space before you begin. Every question is watermarked with your name, candidate ID, and a timestamp — leaving this window or exceeding ${MAX_VIOLATIONS_BEFORE_LOCK} flags will lock the section until a recruiter reviews it.</span>
         </div>
         <div class="actions"><span></span><div class="actions-right">
           <button class="btn gold" id="btn-start-quiz">Begin timed section</button>
@@ -583,6 +631,7 @@ function renderQuizStage(s){
 
   return `
     <div class="card">
+      ${renderWatermark()}
       <div class="stage-head">
         <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length} · Advanced</div>
         <h2>${s.label}</h2>
@@ -771,7 +820,7 @@ function renderLongformStage(s){
         <p class="stage-desc"><strong>Prompt:</strong> ${escapeHtml(cfg.prompt).replace(/\n/g,'<br>')}</p>
         <div class="gate-notice">
           <span>🔒</span>
-          <span>Secured section: minimum ${cfg.minWords} words, ${Math.round(cfg.timeLimitSeconds/60)} minutes on the clock once you start. Pasting is disabled — write in your own words. The timer auto-submits your response when it reaches zero, so pace yourself.</span>
+          <span>Secured section: minimum ${cfg.minWords} words, ${Math.round(cfg.timeLimitSeconds/60)} minutes on the clock once you start. Pasting is disabled — write in your own words. Your response screen is watermarked with your name and candidate ID. The timer auto-submits your response when it reaches zero, so pace yourself.</span>
         </div>
         <div class="actions"><span></span><div class="actions-right">
           <button class="btn gold" id="btn-start-longform">Start writing</button>
@@ -785,6 +834,7 @@ function renderLongformStage(s){
   const timeLow = timeLeft <= 60;
   return `
     <div class="card">
+      ${renderWatermark()}
       <div class="stage-head">
         <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length}</div>
         <h2>${s.label}</h2>
