@@ -17,15 +17,16 @@ cp .env.example .env
 
 Edit `.env`:
 
+- `DATABASE_URL` — a Postgres connection string (Supabase's free tier works well; see
+  [DEPLOY.md](DEPLOY.md) for exactly where to get this). Tables are created automatically on
+  first boot.
 - `SESSION_SECRET` — any long random string.
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD` — used **once**, to create the first HR account when the
-  server starts and no HR account exists yet. Change the password after first login isn't
-  built in yet — for now, changing `.env` and deleting `server/data/recruitment.db` will
-  reseed it (this also wipes all candidate data, so only do that before real use).
-- `PORT` / `BASE_URL` — defaults are fine for local use (`http://localhost:3000`).
-- `SMTP_*` — not used yet. Automated invite emails are on hold; HR currently generates a
-  candidate link from the roster view and sends it manually (copy/paste into email, WhatsApp,
-  etc.).
+  server starts and no HR account exists yet. Changing the password after first login isn't
+  built in yet — for now, changing `.env` and clearing the `hr_users` table in the database
+  will reseed it.
+- `PORT` / `BASE_URL` — `BASE_URL` should be the real public URL once deployed (it's used to
+  build the links HR sends candidates).
 
 ## Run
 
@@ -35,6 +36,11 @@ npm start
 
 Open `http://localhost:3000`. HR roster is at the same URL — click "HR roster view" in the top
 bar and sign in with the admin account from `.env`.
+
+## Deploying it for real
+
+See [DEPLOY.md](DEPLOY.md) for step-by-step instructions to put this on a public URL using
+Supabase + Render + GitHub (and optionally Cloudflare for a custom domain).
 
 ## How candidates get in
 
@@ -49,8 +55,8 @@ Two ways:
 
 ## Data & security notes
 
-- All candidate and HR data lives in `server/data/recruitment.db` (SQLite). Back this file up
-  before any risky operation — deleting it wipes every candidate record.
+- All candidate and HR data lives in the Postgres database pointed to by `DATABASE_URL`. Export
+  what you need (roster CSV, per-candidate exports) before deleting that database/project.
 - Quiz answer keys live only in `server/quizzes.js` and are never sent to the browser.
 - A candidate's own browser cannot clear a security lock on itself or edit its own quiz score —
   only the authoritative `/submit-quiz` endpoint (server-graded) and HR's unlock action can
@@ -67,7 +73,7 @@ Two ways:
 ```
 server/
   index.js         Express app entry
-  db.js            SQLite connection + schema
+  db.js            Postgres pool + schema
   auth.js          HR session auth
   quizzes.js        Private quiz question bank + grading
   stages.js          Shared stage id list
