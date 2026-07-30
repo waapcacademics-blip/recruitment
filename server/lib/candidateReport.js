@@ -1,7 +1,43 @@
-const { QUIZZES, LIKERT_STATEMENTS } = require('../quizzes');
+const { QUIZZES, LEGACY_LIKERT_STATEMENTS, TARGET_TRAITS } = require('../quizzes');
 
 const QUIZ_STAGE_IDS = ['english', 'ict', 'cognitive', 'instructional'];
 const PASS_THRESHOLD = 0.7;
+
+function buildPersonalitySection(personality) {
+  if (!personality) return null;
+
+  // New shape: self-describing responses (trait + statement stored per
+  // answer at submission time), plus a per-trait score breakdown.
+  if (Array.isArray(personality.responses)) {
+    return {
+      traitAvg: personality.traitAvg,
+      traitScores: personality.traitScores
+        ? Object.entries(personality.traitScores).map(([key, value]) => ({
+            trait: TARGET_TRAITS[key] || key,
+            score: value,
+          }))
+        : null,
+      responses: personality.responses.map((r) => ({
+        statement: r.statement,
+        trait: TARGET_TRAITS[r.trait] || null,
+        answerIndex: r.answerIndex,
+      })),
+    };
+  }
+
+  // Legacy shape: submitted before target-trait scoring existed — a bare
+  // answers array paired positionally with the original statement set.
+  // No per-trait breakdown was ever collected for these.
+  return {
+    traitAvg: personality.traitAvg,
+    traitScores: null,
+    responses: LEGACY_LIKERT_STATEMENTS.map((stmt, i) => ({
+      statement: stmt,
+      trait: null,
+      answerIndex: personality.answers ? personality.answers[i] : null,
+    })),
+  };
+}
 
 // Builds the full, HR-facing view of a candidate: scores with per-question
 // review (using the private answer key), essay/case-study text, personality
@@ -32,16 +68,6 @@ function buildCandidateReport(row, state) {
     };
   }
 
-  const personality = state.personality
-    ? {
-        traitAvg: state.personality.traitAvg,
-        responses: LIKERT_STATEMENTS.map((stmt, i) => ({
-          statement: stmt,
-          answerIndex: state.personality.answers[i],
-        })),
-      }
-    : null;
-
   return {
     id: row.id,
     candidateId: state.candidateId,
@@ -50,10 +76,12 @@ function buildCandidateReport(row, state) {
     currentStageId: state.currentStageId,
     startedAt: state.startedAt,
     completedAt: state.completedAt,
+    consent: state.consent || null,
     quizzes,
-    personality,
+    personality: buildPersonalitySection(state.personality),
     essay: state.essay,
     casestudy: state.casestudy,
+    demoVideo: state.demoVideo || null,
     interview: state.interview,
     hrConfirmed: state.hrConfirmed,
     board: state.board,

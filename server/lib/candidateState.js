@@ -17,9 +17,11 @@ function freshCandidateState(name, email) {
     completed: Object.fromEntries(STAGE_IDS.map((id) => [id, false])),
     scores: {},
     quizAnswers: {},
+    consent: null,      // { agreedAt }
     personality: null,
     essay: null,
     casestudy: null,
+    demoVideo: null,    // { url, notes, submittedAt }
     interview: null,
     hrConfirmed: false,
     board: null,

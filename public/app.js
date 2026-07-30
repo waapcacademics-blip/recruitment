@@ -8,6 +8,7 @@
 const SCHOOL_NAME = "WAAPC American School";
 
 const STAGES = [
+  { id:'consent',         label:'Consent & Overview',      sub:'Process overview & data consent',       type:'consent' },
   { id:'english',        label:'English Proficiency',    sub:'Written & usage test · 10 items',       type:'quiz' },
   { id:'ict',             label:'ICT Assessment',          sub:'Digital literacy test · 10 items',      type:'quiz' },
   { id:'cognitive',       label:'Cognitive Ability',       sub:'Reasoning test · 10 items',             type:'quiz' },
@@ -15,11 +16,24 @@ const STAGES = [
   { id:'personality',     label:'Personality Profile',     sub:'Self-report inventory',                 type:'likert' },
   { id:'essay',           label:'Essay Writing',           sub:'Teaching philosophy',                   type:'essay' },
   { id:'casestudy',       label:'Case Study',              sub:'International students scenario',       type:'case' },
+  { id:'video',           label:'Teaching Demo Video',     sub:'~5 minute video link',                  type:'video' },
   { id:'schedule',        label:'Interview Scheduling',    sub:'Pick your interview day',                type:'calendar' },
   { id:'hr',              label:'HR Interview',            sub:'Orientation & fit',                      type:'hr' },
   { id:'board',           label:'Board Interview',         sub:'Final panel round',                      type:'board' },
   { id:'complete',        label:'Application Complete',    sub:'Summary & next steps',                   type:'summary' },
 ];
+
+// 'consent' and 'video' were added after real candidates were already
+// mid-application on the original 11-stage flow. Rather than retroactively
+// inserting new required steps into an application already in progress, any
+// candidate whose saved state predates this change (no 'consent' key in
+// their completed map) stays on the exact sequence they started — only
+// candidates created from now on go through the full new sequence.
+function stagesFor(c){
+  if(!c || !c.completed) return STAGES;
+  const isLegacy = !Object.prototype.hasOwnProperty.call(c.completed, 'consent');
+  return isLegacy ? STAGES.filter(s => s.id !== 'consent' && s.id !== 'video') : STAGES;
+}
 
 const PASS_THRESHOLD = 0.7;
 const SECONDS_PER_QUESTION = 45;
@@ -308,12 +322,17 @@ let rosterPollTimer = null;
 let admin = { authenticated:false, username:null };
 let adminState = { roster:[], loadingRoster:false, detailId:null, detail:null, inviteResult:null, loginError:null };
 
-function stageIndex(id){ return STAGES.findIndex(s => s.id === id); }
-function nextStageId(currentId){ const idx = stageIndex(currentId); return STAGES[idx+1] ? STAGES[idx+1].id : null; }
+function stageIndex(id){ return stagesFor(candidate).findIndex(s => s.id === id); }
+function nextStageId(currentId){
+  const list = stagesFor(candidate);
+  const idx = list.findIndex(s => s.id === currentId);
+  return list[idx+1] ? list[idx+1].id : null;
+}
 function isStageUnlocked(id){
-  const idx = stageIndex(id);
+  const list = stagesFor(candidate);
+  const idx = list.findIndex(s => s.id === id);
   if(idx === 0) return true;
-  const prev = STAGES[idx-1];
+  const prev = list[idx-1];
   return !!candidate.completed[prev.id];
 }
 
@@ -440,7 +459,7 @@ function renderPortalShell(){
     <div class="layout">
       <div class="transcript">
         <div class="transcript-title">Application Transcript</div>
-        ${STAGES.map((s, i) => renderStageItem(s, i)).join('')}
+        ${stagesFor(candidate).map((s, i) => renderStageItem(s, i)).join('')}
       </div>
       <div class="content" id="stage-content"></div>
     </div>`;
@@ -456,7 +475,7 @@ function renderStageItem(s, i){
   if(done) cls.push('done');
   if(held) cls.push('flagged');
   if(!unlocked) cls.push('locked');
-  const rail = i < STAGES.length - 1 ? `<div class="rail-line"></div>` : '';
+  const rail = i < stagesFor(candidate).length - 1 ? `<div class="rail-line"></div>` : '';
   return `
     <div>
       <div class="${cls.join(' ')}" data-stage="${s.id}" data-unlocked="${unlocked}">
@@ -506,15 +525,134 @@ function renderStageBody(){
   }
 
   switch(s.type){
+    case 'consent': host.innerHTML = renderConsentStage(s); bindConsentStage(s); break;
     case 'quiz': host.innerHTML = renderQuizStage(s); bindQuizStage(s); break;
     case 'likert': host.innerHTML = renderLikertStage(s); bindLikertStage(s); break;
     case 'essay': host.innerHTML = renderLongformStage(s); bindLongformStage(s); break;
     case 'case': host.innerHTML = renderLongformStage(s); bindLongformStage(s); break;
+    case 'video': host.innerHTML = renderVideoStage(s); bindVideoStage(s); break;
     case 'calendar': host.innerHTML = renderCalendarStage(s); bindCalendarStage(s); break;
     case 'hr': host.innerHTML = renderHrStage(s); bindHrStage(s); break;
     case 'board': host.innerHTML = renderBoardStage(s); bindBoardStage(s); break;
     case 'summary': host.innerHTML = renderSummaryStage(s); bindSummaryStage(s); break;
   }
+}
+
+/* ---------------- Consent & Overview stage ---------------- */
+function renderConsentStage(s){
+  const done = candidate.completed[s.id];
+  if(done){
+    return `
+      <div class="card">
+        <div class="stage-head">
+          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
+          <h2>${s.label}</h2>
+        </div>
+        <span class="pill pass">Consent recorded</span>
+        <p class="stage-desc" style="margin-top:14px;">Thank you — recorded on ${new Date(candidate.consent.agreedAt).toLocaleString()}.</p>
+        ${renderForwardNav(s.id)}
+      </div>`;
+  }
+  return `
+    <div class="card">
+      <div class="stage-head">
+        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
+        <h2>${s.label}</h2>
+      </div>
+      <p class="stage-desc">Before you begin, here's the full shape of this application so there are no surprises along the way:</p>
+      <ul class="info-list">
+        <li><span class="ico">1</span> Four short tests: English Proficiency, ICT, Cognitive Ability, and Instructional Strategies (10 questions each, timed).</li>
+        <li><span class="ico">2</span> A Personality Profile — a short self-report inventory, not scored pass/fail.</li>
+        <li><span class="ico">3</span> A teaching-philosophy essay and an international-students case study, both written responses.</li>
+        <li><span class="ico">4</span> A link to a short (~5 minute) teaching demonstration video that you host and share with us.</li>
+        <li><span class="ico">5</span> A human review of your application by our hiring team before any interview is scheduled.</li>
+        <li><span class="ico">6</span> Interview-day scheduling, an HR orientation conversation, and a board interview.</li>
+      </ul>
+      <p class="stage-desc">Your responses, scores, essay/case-study text, and demo video link will be visible to WAAPC American School's HR team and hiring committee for the purpose of evaluating your application. Timed sections are monitored for academic integrity (tab-switching, copy/paste, and screenshot attempts are logged) — see the notice on each of those stages for details.</p>
+      <div class="checkline">
+        <input type="checkbox" id="consent-confirm">
+        <label for="consent-confirm">I have read the above, understand how my information will be used, and consent to proceed with this application.</label>
+      </div>
+      ${stageActionsHtml(false, 'Agree & begin application')}
+    </div>`;
+}
+function bindConsentStage(s){
+  if(candidate.completed[s.id]){ bindForwardNav(s.id); return; }
+  const cb = document.getElementById('consent-confirm');
+  const submit = document.getElementById('btn-submit-stage');
+  cb.onchange = () => { submit.disabled = !cb.checked; };
+  submit.onclick = async () => {
+    candidate.consent = { agreedAt: new Date().toISOString() };
+    candidate.completed[s.id] = true;
+    const nid = nextStageId(s.id);
+    if(nid) candidate.currentStageId = nid;
+    draft = {};
+    await saveCandidate();
+    toast('Thanks — your application has begun.');
+    render();
+  };
+}
+
+/* ---------------- Teaching demo video stage ---------------- */
+function isPlausibleUrl(v){
+  try{ const u = new URL(v); return u.protocol === 'http:' || u.protocol === 'https:'; }catch(e){ return false; }
+}
+function renderVideoStage(s){
+  const done = candidate.completed[s.id];
+  if(done){
+    return `
+      <div class="card">
+        <div class="stage-head">
+          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
+          <h2>${s.label}</h2>
+        </div>
+        <span class="pill pass">Submitted</span>
+        <p class="stage-desc" style="margin-top:14px;">Your video link was submitted: <a href="${escapeHtml(candidate.demoVideo.url)}" target="_blank" rel="noopener">${escapeHtml(candidate.demoVideo.url)}</a></p>
+        ${renderForwardNav(s.id)}
+      </div>`;
+  }
+  if(!draft.videoUrl && draft.videoUrl !== '') draft.videoUrl = '';
+  if(!draft.videoNotes && draft.videoNotes !== '') draft.videoNotes = '';
+  const ok = isPlausibleUrl(draft.videoUrl);
+  return `
+    <div class="card">
+      <div class="stage-head">
+        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
+        <h2>${s.label}</h2>
+      </div>
+      <p class="stage-desc">Record a short (around 5 minute) teaching demonstration — any subject/age group you're comfortable with — and host it somewhere you can share a link to (e.g. an unlisted YouTube video, Google Drive, or Loom). Paste that link below.</p>
+      <div class="field">
+        <label for="video-url">Video link</label>
+        <input id="video-url" type="url" placeholder="https://..." value="${escapeHtml(draft.videoUrl)}">
+      </div>
+      <div class="field">
+        <label for="video-notes">Notes for the reviewer (optional)</label>
+        <textarea id="video-notes" rows="3" placeholder="Anything you'd like us to know before watching (subject, age group, context)...">${escapeHtml(draft.videoNotes)}</textarea>
+      </div>
+      ${stageActionsHtml(ok, 'Submit video link')}
+    </div>`;
+}
+function bindVideoStage(s){
+  if(candidate.completed[s.id]){ bindForwardNav(s.id); return; }
+  const urlInput = document.getElementById('video-url');
+  const notesInput = document.getElementById('video-notes');
+  urlInput.oninput = () => {
+    draft.videoUrl = urlInput.value.trim();
+    const submitBtn = document.getElementById('btn-submit-stage');
+    if(submitBtn) submitBtn.disabled = !isPlausibleUrl(draft.videoUrl);
+  };
+  notesInput.oninput = () => { draft.videoNotes = notesInput.value; };
+  const submit = document.getElementById('btn-submit-stage');
+  if(submit) submit.onclick = async () => {
+    candidate.demoVideo = { url: draft.videoUrl, notes: draft.videoNotes || '', submittedAt: new Date().toISOString() };
+    candidate.completed[s.id] = true;
+    const nid = nextStageId(s.id);
+    if(nid) candidate.currentStageId = nid;
+    draft = {};
+    await saveCandidate();
+    toast('Video link submitted and saved.');
+    render();
+  };
 }
 
 function renderLockedStage(s){
@@ -594,7 +732,7 @@ function renderQuizStage(s){
     return `
       <div class="card">
         <div class="stage-head">
-          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length}</div>
+          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
           <h2>${s.label}</h2>
         </div>
         <span class="pill ${passed?'pass':'pending'}" style="${passed?'':'background:var(--crimson-soft);color:var(--crimson-dark);'}">${passed ? 'Meets benchmark' : 'Below benchmark'}</span>
@@ -607,7 +745,7 @@ function renderQuizStage(s){
     return `
       <div class="card">
         <div class="stage-head">
-          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length} · Advanced</div>
+          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length} · Advanced</div>
           <h2>${s.label}</h2>
         </div>
         <p class="stage-desc">This is a secured, timed section: ${quiz.questions.length} questions, one at a time, ${SECONDS_PER_QUESTION} seconds each. Once you start a question you cannot go back to change an earlier answer, and you cannot preview later questions. Copying, pasting, right-click, and switching tabs are disabled and logged.</p>
@@ -633,7 +771,7 @@ function renderQuizStage(s){
     <div class="card">
       ${renderWatermark()}
       <div class="stage-head">
-        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length} · Advanced</div>
+        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length} · Advanced</div>
         <h2>${s.label}</h2>
       </div>
       ${renderSecureBanner(formatClock(timeLeft), timeLow)}
@@ -732,7 +870,7 @@ function renderLikertStage(s){
     return `
       <div class="card">
         <div class="stage-head">
-          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length}</div>
+          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
           <h2>${s.label}</h2>
         </div>
         <span class="pill pass">Submitted</span>
@@ -745,13 +883,13 @@ function renderLikertStage(s){
   return `
     <div class="card">
       <div class="stage-head">
-        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length}</div>
+        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
         <h2>${s.label}</h2>
       </div>
       <p class="stage-desc">Rate how much you agree with each statement. There are no right or wrong answers — respond honestly.</p>
       ${statements.map((stmt, i) => `
         <div class="likert-row">
-          <div class="likert-text">${i+1}. ${escapeHtml(stmt)}</div>
+          <div class="likert-text">${i+1}. ${escapeHtml(stmt.statement)}</div>
           <div class="likert-scale">
             ${LIKERT_LABELS.map((lab, li) => `
               <div class="likert-opt ${draft.likert[i]===li?'selected':''}" data-si="${i}" data-li="${li}">${lab}</div>
@@ -773,8 +911,24 @@ function bindLikertStage(s){
   });
   const submit = document.getElementById('btn-submit-stage');
   if(submit) submit.onclick = async () => {
+    const statements = CONTENT.likertStatements;
     const avg = draft.likert.reduce((a,b)=>a+b,0) / draft.likert.length;
-    candidate.personality = { answers: draft.likert.slice(), traitAvg: Math.round(avg*10)/10 };
+
+    const byTrait = {};
+    statements.forEach((stmt, i) => {
+      if(!byTrait[stmt.trait]) byTrait[stmt.trait] = [];
+      byTrait[stmt.trait].push(draft.likert[i]);
+    });
+    const traitScores = {};
+    for(const [trait, vals] of Object.entries(byTrait)){
+      traitScores[trait] = Math.round((vals.reduce((a,b)=>a+b,0) / vals.length) * 10) / 10;
+    }
+
+    candidate.personality = {
+      responses: statements.map((stmt, i) => ({ trait: stmt.trait, statement: stmt.statement, answerIndex: draft.likert[i] })),
+      traitAvg: Math.round(avg*10)/10,
+      traitScores,
+    };
     candidate.completed[s.id] = true;
     const nid = nextStageId(s.id);
     if(nid) candidate.currentStageId = nid;
@@ -801,7 +955,7 @@ function renderLongformStage(s){
     return `
       <div class="card">
         <div class="stage-head">
-          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length}</div>
+          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
           <h2>${s.label}</h2>
         </div>
         <span class="pill pass">Submitted</span>
@@ -814,7 +968,7 @@ function renderLongformStage(s){
     return `
       <div class="card">
         <div class="stage-head">
-          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length}</div>
+          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
           <h2>${s.label}</h2>
         </div>
         <p class="stage-desc"><strong>Prompt:</strong> ${escapeHtml(cfg.prompt).replace(/\n/g,'<br>')}</p>
@@ -836,7 +990,7 @@ function renderLongformStage(s){
     <div class="card">
       ${renderWatermark()}
       <div class="stage-head">
-        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length}</div>
+        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
         <h2>${s.label}</h2>
       </div>
       ${renderSecureBanner(formatClock(timeLeft), timeLow)}
@@ -946,7 +1100,7 @@ function renderCalendarStage(s){
     return `
       <div class="card">
         <div class="stage-head">
-          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length}</div>
+          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
           <h2>${s.label}</h2>
         </div>
         <span class="pill pass">Confirmed</span>
@@ -959,7 +1113,7 @@ function renderCalendarStage(s){
   return `
     <div class="card">
       <div class="stage-head">
-        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length}</div>
+        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
         <h2>${s.label}</h2>
       </div>
       <p class="stage-desc">Choose one available slot. This single booking covers your on-site interview day: an HR conversation followed by the board panel round.</p>
@@ -1010,7 +1164,7 @@ function renderHrStage(s){
     return `
       <div class="card">
         <div class="stage-head">
-          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length}</div>
+          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
           <h2>${s.label}</h2>
         </div>
         <span class="pill pass">Confirmed</span>
@@ -1021,7 +1175,7 @@ function renderHrStage(s){
   return `
     <div class="card">
       <div class="stage-head">
-        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length}</div>
+        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
         <h2>${s.label}</h2>
       </div>
       <p class="stage-desc">On <strong>${iv.dow}, ${iv.display}</strong> at <strong>${iv.slot}</strong>, you'll meet with HR for an orientation conversation before your board round. Here's what it covers:</p>
@@ -1063,7 +1217,7 @@ function renderBoardStage(s){
     return `
       <div class="card">
         <div class="stage-head">
-          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length}</div>
+          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
           <h2>${s.label}</h2>
         </div>
         <span class="pill pass">Confirmed</span>
@@ -1074,7 +1228,7 @@ function renderBoardStage(s){
   return `
     <div class="card">
       <div class="stage-head">
-        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${STAGES.length}</div>
+        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
         <h2>${s.label}</h2>
       </div>
       <p class="stage-desc">The final round, on <strong>${iv.dow}, ${iv.display}</strong> right after your HR conversation, is a panel interview with school board members. This is where they evaluate long-term fit and vision alignment.</p>
@@ -1134,6 +1288,7 @@ function renderSummaryStage(s){
         <div class="summary-item"><div class="label">Personality Profile</div><div class="value">${traitAvg !== null ? traitAvg + ' / 4' : '—'}</div></div>
         <div class="summary-item"><div class="label">Essay</div><div class="value">${c.essay.wordCount} words</div></div>
         <div class="summary-item"><div class="label">Case Study</div><div class="value">${c.casestudy.wordCount} words</div></div>
+        ${c.demoVideo ? `<div class="summary-item"><div class="label">Teaching Demo Video</div><div class="value" style="font-size:14px;word-break:break-all;">Submitted</div></div>` : ''}
         <div class="summary-item"><div class="label">Interview Day</div><div class="value" style="font-size:15px;">${c.interview.dow}, ${c.interview.display} · ${c.interview.slot}</div></div>
         <div class="summary-item"><div class="label">Security flags logged</div><div class="value">${flagsTotal}</div></div>
       </div>
@@ -1370,6 +1525,11 @@ function renderCandidateDetail(){
         <div class="stage-eyebrow">Candidate detail</div>
         <h2 style="font-family:'Fraunces',serif;font-size:24px;margin:6px 0 2px;">${escapeHtml(r.name)}</h2>
         <div style="color:var(--ink-soft);font-size:13.5px;">${escapeHtml(r.email)} · <span class="mono">${r.candidateId}</span></div>
+        <div style="margin-top:8px;">
+          ${r.consent
+            ? `<span class="pill pass">Consent given · ${new Date(r.consent.agreedAt).toLocaleDateString()}</span>`
+            : `<span class="pill pending">No consent record (started before this was added)</span>`}
+        </div>
         <div style="margin-top:14px;display:flex;gap:10px;">
           <a class="btn secondary" href="/api/admin/candidates/${r.id}/export?format=json" target="_blank" rel="noopener">Download JSON</a>
           <a class="btn secondary" href="/api/admin/candidates/${r.id}/export?format=csv" target="_blank" rel="noopener">Download CSV</a>
@@ -1385,8 +1545,13 @@ function renderCandidateDetail(){
         <div class="detail-section">
           <h3>Personality Profile</h3>
           ${r.personality ? `
-            <p class="stage-desc" style="margin-bottom:10px;">Trait average: <strong>${r.personality.traitAvg} / 4</strong></p>
-            ${r.personality.responses.map(resp => `<div class="qa-row"><div class="qa-q">${escapeHtml(resp.statement)}</div><div class="qa-a">${LIKERT_LABELS[resp.answerIndex] ?? '—'}</div></div>`).join('')}
+            <p class="stage-desc" style="margin-bottom:10px;">Overall average: <strong>${r.personality.traitAvg} / 4</strong></p>
+            ${r.personality.traitScores ? `
+              <div class="summary-grid" style="margin-bottom:16px;">
+                ${r.personality.traitScores.map(t => `<div class="summary-item"><div class="label">${escapeHtml(t.trait)}</div><div class="value">${t.score} / 4</div></div>`).join('')}
+              </div>
+            ` : `<p class="stage-desc" style="font-style:italic;">No per-trait breakdown — this inventory was submitted before target-trait scoring was added.</p>`}
+            ${r.personality.responses.map(resp => `<div class="qa-row"><div class="qa-q">${escapeHtml(resp.statement)}${resp.trait ? ` <span style="color:var(--ink-soft);font-weight:400;">(${escapeHtml(resp.trait)})</span>` : ''}</div><div class="qa-a">${LIKERT_LABELS[resp.answerIndex] ?? '—'}</div></div>`).join('')}
           ` : `<p class="stage-desc">Not yet completed.</p>`}
         </div>
 
@@ -1398,6 +1563,13 @@ function renderCandidateDetail(){
         <div class="detail-section">
           <h3>Case Study — International Students</h3>
           ${r.casestudy ? `<div class="longform-box">${escapeHtml(r.casestudy.text)}</div><p class="stage-desc" style="margin-top:8px;margin-bottom:0;">${r.casestudy.wordCount} words${r.casestudy.timedOut ? ' · auto-submitted at time limit' : ''}</p>` : `<p class="stage-desc">Not yet completed.</p>`}
+        </div>
+
+        <div class="detail-section">
+          <h3>Teaching Demo Video</h3>
+          ${r.demoVideo
+            ? `<p class="stage-desc" style="margin-bottom:6px;"><a href="${escapeHtml(r.demoVideo.url)}" target="_blank" rel="noopener">${escapeHtml(r.demoVideo.url)}</a></p>${r.demoVideo.notes ? `<p class="stage-desc" style="margin-bottom:0;">${escapeHtml(r.demoVideo.notes)}</p>` : ''}`
+            : `<p class="stage-desc">Not yet submitted.</p>`}
         </div>
 
         <div class="detail-section">

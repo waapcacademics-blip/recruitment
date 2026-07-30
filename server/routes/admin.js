@@ -5,7 +5,8 @@ const { requireAdmin, verifyAdminLogin } = require('../auth');
 const { freshCandidateState, deriveRosterFields } = require('../lib/candidateState');
 const { buildCandidateReport, QUIZ_STAGE_IDS, PASS_THRESHOLD } = require('../lib/candidateReport');
 const { toCsv } = require('../lib/csv');
-const { STAGE_IDS } = require('../stages');
+const { STAGE_IDS, stageIdsFor } = require('../stages');
+const { TARGET_TRAITS } = require('../quizzes');
 
 const router = express.Router();
 
@@ -63,7 +64,7 @@ router.get('/roster', async (req, res) => {
       email: row.email,
       currentStage: stage,
       completedCount: row.completed_count,
-      totalStages: STAGE_IDS.length,
+      totalStages: stageIdsFor(state).length,
       flagsTotal: row.flags_total,
       lockedStages: Object.keys(state.integrity.lockedStages || {}),
       startedAt: state.startedAt,
@@ -139,7 +140,7 @@ router.get('/roster/export', async (req, res) => {
     { label: 'Name', value: (r) => r.state.name },
     { label: 'Email', value: (r) => r.state.email },
     { label: 'Current Stage', value: (r) => r.row.current_stage },
-    { label: 'Completed Stages', value: (r) => `${r.row.completed_count}/${STAGE_IDS.length}` },
+    { label: 'Completed Stages', value: (r) => `${r.row.completed_count}/${stageIdsFor(r.state).length}` },
     ...QUIZ_STAGE_IDS.map((id) => ({
       label: id[0].toUpperCase() + id.slice(1) + ' Score',
       value: (r) => (r.state.scores[id] ? `${r.state.scores[id].correct}/${r.state.scores[id].total}` : ''),
@@ -150,8 +151,15 @@ router.get('/roster/export', async (req, res) => {
         r.state.scores[id] ? (r.state.scores[id].correct / r.state.scores[id].total >= PASS_THRESHOLD ? 'Yes' : 'No') : '',
     })),
     { label: 'Personality Avg', value: (r) => (r.state.personality ? r.state.personality.traitAvg : '') },
+    ...Object.entries(TARGET_TRAITS).map(([key, label]) => ({
+      label: `Trait: ${label}`,
+      value: (r) => (r.state.personality && r.state.personality.traitScores ? r.state.personality.traitScores[key] ?? '' : ''),
+    })),
     { label: 'Essay Word Count', value: (r) => (r.state.essay ? r.state.essay.wordCount : '') },
     { label: 'Case Study Word Count', value: (r) => (r.state.casestudy ? r.state.casestudy.wordCount : '') },
+    { label: 'Demo Video Link', value: (r) => (r.state.demoVideo ? r.state.demoVideo.url : '') },
+    { label: 'Consent Given', value: (r) => (r.state.consent ? 'Yes' : 'No') },
+    { label: 'Consent At', value: (r) => (r.state.consent ? r.state.consent.agreedAt : '') },
     { label: 'Interview Day', value: (r) => (r.state.interview ? `${r.state.interview.dow} ${r.state.interview.display}` : '') },
     { label: 'Interview Slot', value: (r) => (r.state.interview ? r.state.interview.slot : '') },
     { label: 'HR Confirmed', value: (r) => (r.state.hrConfirmed ? 'Yes' : 'No') },
@@ -199,8 +207,13 @@ router.get('/candidates/:id/export', async (req, res) => {
   }
   if (report.personality) {
     report.personality.responses.forEach((r) => {
-      rows.push({ section: 'Personality', item: r.statement, response: String(r.answerIndex), correct: '', result: '' });
+      rows.push({ section: 'Personality', item: r.statement, response: String(r.answerIndex), correct: '', result: r.trait || '' });
     });
+    if (report.personality.traitScores) {
+      report.personality.traitScores.forEach((t) => {
+        rows.push({ section: 'Personality — Trait Score', item: t.trait, response: String(t.score), correct: '', result: '' });
+      });
+    }
   }
   if (report.essay) {
     rows.push({ section: 'Essay', item: 'Response text', response: report.essay.text, correct: '', result: `${report.essay.wordCount} words` });
@@ -208,6 +221,10 @@ router.get('/candidates/:id/export', async (req, res) => {
   if (report.casestudy) {
     rows.push({ section: 'Case Study', item: 'Response text', response: report.casestudy.text, correct: '', result: `${report.casestudy.wordCount} words` });
   }
+  if (report.demoVideo) {
+    rows.push({ section: 'Demo Video', item: 'Link', response: report.demoVideo.url, correct: '', result: report.demoVideo.notes || '' });
+  }
+  rows.push({ section: 'Consent', item: 'Consent given', response: report.consent ? 'Yes' : 'No', correct: '', result: report.consent ? report.consent.agreedAt : '' });
   const columns = [
     { label: 'Section', value: (r) => r.section },
     { label: 'Item', value: (r) => r.item },

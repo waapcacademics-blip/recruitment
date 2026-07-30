@@ -144,7 +144,21 @@ const QUIZZES = {
   },
 };
 
-const LIKERT_STATEMENTS = [
+// Each statement is tagged to one of four target traits the hiring
+// committee wants a read on. Two statements per trait; the candidate never
+// sees the trait labels, only the statement — scoring per trait happens
+// after submission (see submitLikert in candidates.js / app.js).
+const TARGET_TRAITS = {
+  openMindedness: 'Open-Mindedness',
+  collaboration: 'Collaboration',
+  diversityAcceptance: 'Acceptance of Diversity',
+  adaptability: 'Adaptability',
+};
+
+// Original (pre-target-traits) statement set, kept only so HR can still see
+// a correct statement/answer pairing for personality inventories that were
+// already submitted before this change — see buildCandidateReport().
+const LEGACY_LIKERT_STATEMENTS = [
   "I stay calm when a lesson plan doesn't go as expected.",
   "I enjoy adapting my teaching style to different learners.",
   "I prefer clear routines over improvising in the classroom.",
@@ -153,6 +167,17 @@ const LIKERT_STATEMENTS = [
   "I feel energized after collaborating with a team.",
   "I stay organized even during high-pressure weeks.",
   "I'm comfortable using new technology in my teaching.",
+];
+
+const LIKERT_STATEMENTS = [
+  { statement: "I enjoy considering teaching approaches that are different from my own.", trait: 'openMindedness' },
+  { statement: "I'm willing to change my opinion when presented with a good argument.", trait: 'openMindedness' },
+  { statement: "I feel energized after collaborating with a team.", trait: 'collaboration' },
+  { statement: "I find it easy to give constructive feedback to colleagues.", trait: 'collaboration' },
+  { statement: "I adapt my communication style to work effectively with people from different cultural backgrounds.", trait: 'diversityAcceptance' },
+  { statement: "I believe a classroom benefits from students and staff with diverse perspectives and backgrounds.", trait: 'diversityAcceptance' },
+  { statement: "I stay calm when a lesson plan doesn't go as expected.", trait: 'adaptability' },
+  { statement: "I adjust my plans quickly when circumstances change unexpectedly.", trait: 'adaptability' },
 ];
 
 const LONGFORM = {
@@ -189,4 +214,4 @@ function gradeQuiz(stageId, answers) {
   return { correct, total: quiz.questions.length };
 }
 
-module.exports = { QUIZZES, LIKERT_STATEMENTS, LONGFORM, publicQuiz, gradeQuiz };
+module.exports = { QUIZZES, LIKERT_STATEMENTS, LEGACY_LIKERT_STATEMENTS, TARGET_TRAITS, LONGFORM, publicQuiz, gradeQuiz };
