@@ -23,6 +23,7 @@ function freshCandidateState(name, email) {
     casestudy: null,
     demoVideo: null,    // { url, notes, submittedAt }
     shortlist: null,    // { decision: 'advance'|'reject', decidedAt }
+    rejectionEmail: null, // { sentAt }
     interview: null,
     hrConfirmed: false,
     board: null,

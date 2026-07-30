@@ -125,6 +125,12 @@ async function apiAdminShortlistDecision(id, decision){
     body: JSON.stringify({ decision }),
   });
 }
+async function apiAdminSendRejectionEmail(id){
+  const res = await fetch(`/api/admin/candidates/${id}/send-rejection-email`, { method:'POST' });
+  const data = await res.json();
+  if(!res.ok) throw new Error(data.error || 'Could not send the email.');
+  return data; // { ok, alreadySent, sentAt }
+}
 async function apiAdminInvite(name, email){
   const res = await fetch('/api/admin/invite', {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -1608,7 +1614,9 @@ function renderCandidateDetail(){
         <div style="margin-top:8px;">
           ${r.consent
             ? `<span class="pill pass">Consent given · ${new Date(r.consent.agreedAt).toLocaleDateString()}</span>`
-            : `<span class="pill pending">No consent record (started before this was added)</span>`}
+            : r.currentStageId === 'consent'
+              ? `<span class="pill pending">Consent pending — still on this step</span>`
+              : `<span class="pill pending">No consent record (started before this was added)</span>`}
         </div>
         <div style="margin-top:14px;display:flex;gap:10px;">
           <a class="btn secondary" href="/api/admin/candidates/${r.id}/export?format=json" target="_blank" rel="noopener">Download JSON</a>
@@ -1664,6 +1672,16 @@ function renderCandidateDetail(){
             <button class="btn gold" id="btn-shortlist-advance" ${r.shortlist && r.shortlist.decision === 'advance' ? 'disabled' : ''}>Advance to interview</button>
             <button class="btn secondary" id="btn-shortlist-reject" style="border-color:var(--crimson);color:var(--crimson-dark);" ${r.shortlist && r.shortlist.decision === 'reject' ? 'disabled' : ''}>Reject application</button>
           </div>
+          ${r.shortlist && r.shortlist.decision === 'reject' ? `
+            <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line-soft);">
+              ${r.rejectionEmail
+                ? `<p class="stage-desc" style="margin-bottom:0;">✓ Rejection email sent ${new Date(r.rejectionEmail.sentAt).toLocaleString()}.</p>`
+                : `
+                  <button class="btn secondary" id="btn-send-rejection-email" style="border-color:var(--crimson);color:var(--crimson-dark);">Send rejection email to candidate</button>
+                  <p class="stage-desc" style="margin-top:8px;margin-bottom:0;font-size:12.5px;">Sends a brief, generic email — no specific reason is included. This can only be sent once.</p>
+                `}
+            </div>
+          ` : ''}
         </div>
         ` : ''}
 
@@ -1699,6 +1717,21 @@ function renderCandidateDetail(){
     toast('Decision recorded.');
     await openCandidateDetail(r.id);
     refreshRoster();
+  };
+  const sendEmailBtn = document.getElementById('btn-send-rejection-email');
+  if(sendEmailBtn) sendEmailBtn.onclick = async () => {
+    if(!confirm(`Send the rejection email to ${r.email} now? This can only be sent once.`)) return;
+    sendEmailBtn.disabled = true;
+    sendEmailBtn.textContent = 'Sending…';
+    try{
+      const result = await apiAdminSendRejectionEmail(r.id);
+      toast(result.alreadySent ? 'Already sent earlier.' : 'Rejection email sent.');
+      await openCandidateDetail(r.id);
+    }catch(e){
+      toast(e.message);
+      sendEmailBtn.disabled = false;
+      sendEmailBtn.textContent = 'Send rejection email to candidate';
+    }
   };
 }
 

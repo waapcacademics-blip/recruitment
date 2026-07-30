@@ -27,6 +27,11 @@ Edit `.env`:
   will reseed it.
 - `PORT` / `BASE_URL` — `BASE_URL` should be the real public URL once deployed (it's used to
   build the links HR sends candidates).
+- `SMTP_*` — optional. Only needed for the "Send rejection email" button in the candidate
+  detail view (candidate invite links are still generated manually by HR, not emailed
+  automatically). Leave unset and that button shows a clear error instead of failing silently.
+  Gmail works with an [App Password](https://myaccount.google.com/apppasswords); any standard
+  SMTP provider (SendGrid, Resend, Postmark, etc.) works too.
 
 ## Run
 

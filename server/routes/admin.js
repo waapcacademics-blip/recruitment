@@ -7,6 +7,7 @@ const { buildCandidateReport, QUIZ_STAGE_IDS, PASS_THRESHOLD } = require('../lib
 const { toCsv } = require('../lib/csv');
 const { STAGE_IDS, stageIdsFor } = require('../stages');
 const { TARGET_TRAITS } = require('../quizzes');
+const { sendRejectionEmail } = require('../email');
 
 const router = express.Router();
 
@@ -107,6 +108,36 @@ router.post('/candidates/:id/shortlist', async (req, res) => {
     [derived.currentStage, derived.completedCount, derived.flagsTotal, JSON.stringify(state), new Date().toISOString(), row.id]
   );
   res.json({ ok: true });
+});
+
+// ---- Send the rejection email (only for candidates HR has actually
+// rejected; idempotent — a repeat click reports it was already sent rather
+// than sending a second copy). ----
+router.post('/candidates/:id/send-rejection-email', async (req, res) => {
+  const row = await selectById(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Candidate not found.' });
+
+  const state = JSON.parse(row.state);
+  if (!state.shortlist || state.shortlist.decision !== 'reject') {
+    return res.status(400).json({ error: 'This candidate has not been marked as rejected.' });
+  }
+  if (state.rejectionEmail) {
+    return res.json({ ok: true, alreadySent: true, sentAt: state.rejectionEmail.sentAt });
+  }
+
+  try {
+    await sendRejectionEmail({ name: state.name, email: state.email });
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+
+  state.rejectionEmail = { sentAt: new Date().toISOString() };
+  await pool.query(`UPDATE candidates SET state=$1, updated_at=$2 WHERE id=$3`, [
+    JSON.stringify(state),
+    new Date().toISOString(),
+    row.id,
+  ]);
+  res.json({ ok: true, alreadySent: false });
 });
 
 // ---- Unlock a locked section ----
@@ -253,6 +284,9 @@ router.get('/candidates/:id/export', async (req, res) => {
   rows.push({ section: 'Consent', item: 'Consent given', response: report.consent ? 'Yes' : 'No', correct: '', result: report.consent ? report.consent.agreedAt : '' });
   if (report.shortlist) {
     rows.push({ section: 'Shortlist', item: 'Decision', response: report.shortlist.decision, correct: '', result: report.shortlist.decidedAt });
+  }
+  if (report.rejectionEmail) {
+    rows.push({ section: 'Shortlist', item: 'Rejection email sent', response: 'Yes', correct: '', result: report.rejectionEmail.sentAt });
   }
   const columns = [
     { label: 'Section', value: (r) => r.section },

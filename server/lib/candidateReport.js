@@ -83,6 +83,7 @@ function buildCandidateReport(row, state) {
     casestudy: state.casestudy,
     demoVideo: state.demoVideo || null,
     shortlist: state.shortlist || null,
+    rejectionEmail: state.rejectionEmail || null,
     interview: state.interview,
     hrConfirmed: state.hrConfirmed,
     board: state.board,
