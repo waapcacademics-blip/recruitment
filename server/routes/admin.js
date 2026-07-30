@@ -180,16 +180,11 @@ router.post('/candidates/:id/unlock', async (req, res) => {
 
 // ---- Create a candidate record and hand back a link for HR to send manually ----
 // (Automated email delivery is on hold — HR copies/sends this link themselves for now.)
-router.post('/invite', async (req, res) => {
-  const name = String(req.body.name || '').trim();
-  const email = normalizeEmail(req.body.email);
-  if (!name || !isValidEmail(email)) {
-    return res.status(400).json({ error: 'A full name and valid email are required.' });
-  }
+async function createOrGetInvite(name, email) {
+  const base = process.env.BASE_URL || '';
   const existing = await selectByEmail(email);
   if (existing) {
-    const base = process.env.BASE_URL || '';
-    return res.json({ link: `${base}/?email=${encodeURIComponent(email)}`, alreadyExists: true });
+    return { link: `${base}/?email=${encodeURIComponent(email)}`, alreadyExists: true };
   }
 
   const state = freshCandidateState(name, email);
@@ -202,8 +197,44 @@ router.post('/invite', async (req, res) => {
   );
   await pool.query('INSERT INTO invites (email, sent_at) VALUES ($1, $2)', [email, now]);
 
-  const base = process.env.BASE_URL || '';
-  res.json({ link: `${base}/?email=${encodeURIComponent(email)}`, alreadyExists: false });
+  return { link: `${base}/?email=${encodeURIComponent(email)}`, alreadyExists: false };
+}
+
+router.post('/invite', async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const email = normalizeEmail(req.body.email);
+  if (!name || !isValidEmail(email)) {
+    return res.status(400).json({ error: 'A full name and valid email are required.' });
+  }
+  const result = await createOrGetInvite(name, email);
+  res.json(result);
+});
+
+// ---- Bulk invite — HR pastes many "Name, email" rows at once (e.g. copied
+// from a spreadsheet). Each row is created independently; one bad row
+// doesn't stop the rest. Capped generously above what this tool is sized
+// for, mainly to guard against a truly malformed paste. ----
+router.post('/invite/bulk', async (req, res) => {
+  const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+  if (!rows.length) return res.status(400).json({ error: 'No rows to process.' });
+  if (rows.length > 1000) return res.status(400).json({ error: 'That is more rows than this endpoint is meant to handle at once (max 1000).' });
+
+  const results = [];
+  for (const row of rows) {
+    const name = String((row && row.name) || '').trim();
+    const email = normalizeEmail(row && row.email);
+    if (!name || !isValidEmail(email)) {
+      results.push({ name: row && row.name, email: row && row.email, status: 'error', error: 'Missing or invalid name/email.' });
+      continue;
+    }
+    try {
+      const { link, alreadyExists } = await createOrGetInvite(name, email);
+      results.push({ name, email, link, status: alreadyExists ? 'existing' : 'created' });
+    } catch (err) {
+      results.push({ name, email, status: 'error', error: err.message });
+    }
+  }
+  res.json({ results });
 });
 
 // ---- Exports ----

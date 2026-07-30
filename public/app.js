@@ -131,6 +131,15 @@ async function apiAdminSendRejectionEmail(id){
   if(!res.ok) throw new Error(data.error || 'Could not send the email.');
   return data; // { ok, alreadySent, sentAt }
 }
+async function apiAdminBulkInvite(rows){
+  const res = await fetch('/api/admin/invite/bulk', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ rows }),
+  });
+  const data = await res.json();
+  if(!res.ok) throw new Error(data.error || 'Could not process the list.');
+  return data.results;
+}
 async function apiAdminInvite(name, email){
   const res = await fetch('/api/admin/invite', {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -1449,12 +1458,88 @@ function renderAdminShell(){
         </div>
         <div id="invite-result" style="margin-top:12px;"></div>
       </div>
+      <div class="card" style="padding:20px 22px;margin-bottom:22px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div style="font-weight:600;font-size:13.5px;">Bulk add candidates</div>
+          <button class="linklike" id="btn-bulk-toggle">Show</button>
+        </div>
+        <div id="bulk-invite-panel" style="display:none;">
+          <p class="stage-desc" style="margin-bottom:10px;">Paste one candidate per line — copied straight from a spreadsheet works (columns separated by tab or comma): <span class="mono">Full Name, email@example.com</span></p>
+          <textarea id="bulk-invite-text" rows="6" style="width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:3px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;background:var(--paper-2);color:var(--ink);" placeholder="Amara Diallo, amara@example.com&#10;John Mensah, john@example.com"></textarea>
+          <div style="margin-top:10px;display:flex;gap:10px;align-items:center;">
+            <button class="btn gold" id="btn-bulk-submit">Create all application links</button>
+            <span id="bulk-invite-count" style="font-size:12.5px;color:var(--ink-soft);"></span>
+          </div>
+          <div id="bulk-invite-result" style="margin-top:14px;"></div>
+        </div>
+      </div>
       <div id="admin-body"></div>
     </div>
     <div id="detail-host"></div>`;
 }
 
+function parseBulkRows(text){
+  return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
+    const parts = (line.includes('\t') ? line.split('\t') : line.split(',')).map(p => p.trim()).filter(Boolean);
+    if(parts.length < 2) return { name: parts[0] || '', email: '' };
+    const email = parts[parts.length - 1];
+    const name = parts.slice(0, parts.length - 1).join(' ');
+    return { name, email };
+  });
+}
+
 function bindAdminShell(){
+  const bulkToggle = document.getElementById('btn-bulk-toggle');
+  const bulkPanel = document.getElementById('bulk-invite-panel');
+  bulkToggle.onclick = () => {
+    const showing = bulkPanel.style.display !== 'none';
+    bulkPanel.style.display = showing ? 'none' : 'block';
+    bulkToggle.textContent = showing ? 'Show' : 'Hide';
+  };
+  const bulkText = document.getElementById('bulk-invite-text');
+  const bulkCount = document.getElementById('bulk-invite-count');
+  bulkText.oninput = () => {
+    const n = parseBulkRows(bulkText.value).length;
+    bulkCount.textContent = n ? `${n} row${n===1?'':'s'} detected` : '';
+  };
+  const bulkSubmit = document.getElementById('btn-bulk-submit');
+  bulkSubmit.onclick = async () => {
+    const rows = parseBulkRows(bulkText.value);
+    const resultEl = document.getElementById('bulk-invite-result');
+    if(!rows.length){ resultEl.innerHTML = `<div class="err">Paste at least one row first.</div>`; return; }
+    bulkSubmit.disabled = true;
+    bulkSubmit.textContent = 'Creating…';
+    try{
+      const results = await apiAdminBulkInvite(rows);
+      const created = results.filter(r => r.status === 'created').length;
+      const existing = results.filter(r => r.status === 'existing').length;
+      const errors = results.filter(r => r.status === 'error').length;
+      const allLinksText = results.filter(r => r.link).map(r => `${r.name}\t${r.email}\t${r.link}`).join('\n');
+      resultEl.innerHTML = `
+        <p class="stage-desc" style="margin-bottom:8px;">${created} created, ${existing} already existed, ${errors} failed.</p>
+        ${allLinksText ? `<button class="btn secondary" id="btn-copy-all-links" style="margin-bottom:10px;">Copy all as Name / Email / Link (tab-separated)</button>` : ''}
+        <div style="max-height:280px;overflow-y:auto;border:1px solid var(--line-soft);border-radius:4px;">
+          ${results.map(r => `
+            <div style="padding:9px 12px;border-bottom:1px solid var(--line-soft);font-size:12.5px;display:flex;justify-content:space-between;gap:10px;align-items:center;">
+              <span>${escapeHtml(r.name||'')} <span style="color:var(--ink-soft);">${escapeHtml(r.email||'')}</span></span>
+              ${r.status === 'error'
+                ? `<span class="pill pending" style="border-color:var(--crimson);color:var(--crimson-dark);">${escapeHtml(r.error)}</span>`
+                : `<span class="pill ${r.status==='created'?'pass':'pending'}">${r.status === 'created' ? 'Created' : 'Existing'}</span>`}
+            </div>
+          `).join('')}
+        </div>`;
+      const copyAllBtn = document.getElementById('btn-copy-all-links');
+      if(copyAllBtn) copyAllBtn.onclick = () => {
+        navigator.clipboard.writeText(allLinksText).then(() => toast('All links copied.'));
+      };
+      refreshRoster();
+    }catch(e){
+      resultEl.innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`;
+    }
+    bulkSubmit.disabled = false;
+    bulkSubmit.textContent = 'Create all application links';
+  };
+
   const btn = document.getElementById('btn-invite');
   btn.onclick = async () => {
     const name = document.getElementById('invite-name').value.trim();
