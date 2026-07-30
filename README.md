@@ -1,9 +1,14 @@
 # WAAPC American School — Faculty Recruitment Portal
 
-An 11-stage teacher recruitment platform: English/ICT/Cognitive/Instructional Strategies
-quizzes, a personality inventory, an essay, a case study, interview scheduling, HR and board
-interview confirmations, and a live HR roster with real-time scores, full responses, and
-CSV/JSON export.
+A teacher recruitment platform: a consent/process-overview screen, English/ICT/Cognitive/
+Instructional Strategies quizzes, a personality inventory scored against four named target
+traits, an essay, a case study, a teaching demo video link, a human shortlist review before
+interview scheduling, HR and board interview confirmations, and a live HR roster with
+real-time scores, full responses, CSV/JSON export, and optional rejection emails.
+
+Candidates created before these later additions (consent, demo video, shortlist review) stay
+on the original 11-stage sequence they started — see `stagesFor()` in `public/app.js` and
+`stageIdsFor()` in `server/stages.js`.
 
 Candidate quiz grading happens **server-side only** — the browser never receives correct
 answers, only questions and options.
@@ -32,6 +37,12 @@ Edit `.env`:
   automatically). Leave unset and that button shows a clear error instead of failing silently.
   Gmail works with an [App Password](https://myaccount.google.com/apppasswords); any standard
   SMTP provider (SendGrid, Resend, Postmark, etc.) works too.
+- `ANTHROPIC_API_KEY` — optional. Powers an advisory-only "AI reading aid" HR sees alongside
+  the essay/case study text (does it address the prompt, how substantial is it, any generic/
+  off-topic red flags). **It never scores, grades, or recommends a decision** — automated
+  employment-decision tools are legally regulated in several jurisdictions, so the only thing
+  that actually gates progression is the human shortlist decision. Leave unset and the reading
+  aid section just won't appear.
 
 ## Run
 

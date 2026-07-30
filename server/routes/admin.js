@@ -6,8 +6,9 @@ const { freshCandidateState, deriveRosterFields } = require('../lib/candidateSta
 const { buildCandidateReport, QUIZ_STAGE_IDS, PASS_THRESHOLD } = require('../lib/candidateReport');
 const { toCsv } = require('../lib/csv');
 const { STAGE_IDS, stageIdsFor } = require('../stages');
-const { TARGET_TRAITS } = require('../quizzes');
+const { TARGET_TRAITS, LONGFORM } = require('../quizzes');
 const { sendRejectionEmail } = require('../email');
+const { aiConfigured, screenLongform } = require('../lib/aiScreen');
 
 const router = express.Router();
 
@@ -80,10 +81,28 @@ router.get('/roster', async (req, res) => {
 });
 
 // ---- Candidate detail (full responses) ----
+// Runs the (advisory-only) AI reading aid on the essay/case study the first
+// time this candidate is opened, if both are submitted and not already
+// screened — then caches the result so it's never recomputed or re-billed.
 router.get('/candidates/:id', async (req, res) => {
   const row = await selectById(req.params.id);
   if (!row) return res.status(404).json({ error: 'Candidate not found.' });
   const state = JSON.parse(row.state);
+
+  if (aiConfigured() && !state.aiScreening && state.essay && state.casestudy) {
+    try {
+      const [essayScreen, casestudyScreen] = await Promise.all([
+        screenLongform({ label: 'Essay — Teaching Philosophy', promptText: LONGFORM.essay.prompt, minWords: LONGFORM.essay.minWords, responseText: state.essay.text }),
+        screenLongform({ label: 'Case Study — International Students', promptText: LONGFORM.casestudy.prompt, minWords: LONGFORM.casestudy.minWords, responseText: state.casestudy.text }),
+      ]);
+      state.aiScreening = { essay: essayScreen, casestudy: casestudyScreen, screenedAt: new Date().toISOString() };
+      await pool.query(`UPDATE candidates SET state=$1 WHERE id=$2`, [JSON.stringify(state), row.id]);
+    } catch (err) {
+      console.error('[aiScreen] failed for candidate', row.id, err.message);
+      // Non-fatal — the detail view just shows "unavailable" and tries again next open.
+    }
+  }
+
   res.json({ report: buildCandidateReport(row, state) });
 });
 
@@ -274,9 +293,15 @@ router.get('/candidates/:id/export', async (req, res) => {
   }
   if (report.essay) {
     rows.push({ section: 'Essay', item: 'Response text', response: report.essay.text, correct: '', result: `${report.essay.wordCount} words` });
+    if (report.aiScreening && report.aiScreening.essay) {
+      rows.push({ section: 'Essay', item: 'AI reading aid (advisory only)', response: report.aiScreening.essay.summary, correct: '', result: '' });
+    }
   }
   if (report.casestudy) {
     rows.push({ section: 'Case Study', item: 'Response text', response: report.casestudy.text, correct: '', result: `${report.casestudy.wordCount} words` });
+    if (report.aiScreening && report.aiScreening.casestudy) {
+      rows.push({ section: 'Case Study', item: 'AI reading aid (advisory only)', response: report.aiScreening.casestudy.summary, correct: '', result: '' });
+    }
   }
   if (report.demoVideo) {
     rows.push({ section: 'Demo Video', item: 'Link', response: report.demoVideo.url, correct: '', result: report.demoVideo.notes || '' });

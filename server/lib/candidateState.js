@@ -24,6 +24,7 @@ function freshCandidateState(name, email) {
     demoVideo: null,    // { url, notes, submittedAt }
     shortlist: null,    // { decision: 'advance'|'reject', decidedAt }
     rejectionEmail: null, // { sentAt }
+    aiScreening: null,    // { essay: {...}, casestudy: {...}, screenedAt } — advisory only, see aiScreen.js
     interview: null,
     hrConfirmed: false,
     board: null,

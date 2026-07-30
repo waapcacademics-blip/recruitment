@@ -1604,6 +1604,24 @@ function renderCandidateDetail(){
       `).join('')}`;
   };
 
+  const DEPTH_LABELS = { substantial:'Substantial', moderate:'Moderate', thin:'Thin', generic_or_off_topic:'Generic / off-topic' };
+  const renderAiScreenBox = (screen, hasResponse) => {
+    if(!hasResponse) return '';
+    if(!screen) return `<p class="stage-desc" style="font-style:italic;margin-top:10px;">AI reading aid not available (not configured, or not yet processed — reopening this candidate will try again).</p>`;
+    return `
+      <div style="margin-top:12px;padding:14px 16px;border:1px dashed var(--line);border-radius:4px;background:var(--paper-2);">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);font-weight:700;margin-bottom:8px;">AI reading aid — not a score, not a recommendation. Read the response yourself.</div>
+        <p class="stage-desc" style="margin-bottom:8px;">${escapeHtml(screen.summary)}</p>
+        <div style="margin-bottom:8px;">
+          <span class="pill pending">${screen.addressesAllRequirements ? 'Addresses all stated requirements' : 'May be missing something'}</span>
+          <span class="pill pending" style="margin-left:6px;">${DEPTH_LABELS[screen.depthAssessment] || screen.depthAssessment}</span>
+        </div>
+        ${screen.missingElements && screen.missingElements.length ? `<p class="stage-desc" style="margin-bottom:4px;"><strong>Possibly missing:</strong> ${screen.missingElements.map(escapeHtml).join('; ')}</p>` : ''}
+        ${screen.notableConcerns && screen.notableConcerns.length ? `<p class="stage-desc" style="margin-bottom:4px;"><strong>Notable:</strong> ${screen.notableConcerns.map(escapeHtml).join('; ')}</p>` : ''}
+        ${screen.notableStrengths && screen.notableStrengths.length ? `<p class="stage-desc" style="margin-bottom:0;"><strong>Strengths noted:</strong> ${screen.notableStrengths.map(escapeHtml).join('; ')}</p>` : ''}
+      </div>`;
+  };
+
   host.innerHTML = `
     <div class="detail-backdrop" id="detail-backdrop">
       <div class="detail-panel">
@@ -1645,12 +1663,12 @@ function renderCandidateDetail(){
 
         <div class="detail-section">
           <h3>Essay — Teaching Philosophy</h3>
-          ${r.essay ? `<div class="longform-box">${escapeHtml(r.essay.text)}</div><p class="stage-desc" style="margin-top:8px;margin-bottom:0;">${r.essay.wordCount} words${r.essay.timedOut ? ' · auto-submitted at time limit' : ''}</p>` : `<p class="stage-desc">Not yet completed.</p>`}
+          ${r.essay ? `<div class="longform-box">${escapeHtml(r.essay.text)}</div><p class="stage-desc" style="margin-top:8px;margin-bottom:0;">${r.essay.wordCount} words${r.essay.timedOut ? ' · auto-submitted at time limit' : ''}</p>${renderAiScreenBox(r.aiScreening && r.aiScreening.essay, !!r.essay)}` : `<p class="stage-desc">Not yet completed.</p>`}
         </div>
 
         <div class="detail-section">
           <h3>Case Study — International Students</h3>
-          ${r.casestudy ? `<div class="longform-box">${escapeHtml(r.casestudy.text)}</div><p class="stage-desc" style="margin-top:8px;margin-bottom:0;">${r.casestudy.wordCount} words${r.casestudy.timedOut ? ' · auto-submitted at time limit' : ''}</p>` : `<p class="stage-desc">Not yet completed.</p>`}
+          ${r.casestudy ? `<div class="longform-box">${escapeHtml(r.casestudy.text)}</div><p class="stage-desc" style="margin-top:8px;margin-bottom:0;">${r.casestudy.wordCount} words${r.casestudy.timedOut ? ' · auto-submitted at time limit' : ''}</p>${renderAiScreenBox(r.aiScreening && r.aiScreening.casestudy, !!r.casestudy)}` : `<p class="stage-desc">Not yet completed.</p>`}
         </div>
 
         <div class="detail-section">
