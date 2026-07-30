@@ -71,6 +71,8 @@ router.get('/roster', async (req, res) => {
       completedAt: state.completedAt,
       updatedAt: row.updated_at,
       scores: state.scores,
+      shortlistDecision: state.shortlist ? state.shortlist.decision : null,
+      awaitingShortlist: state.currentStageId === 'shortlist' && !state.shortlist,
     };
   });
   res.json({ roster });
@@ -82,6 +84,29 @@ router.get('/candidates/:id', async (req, res) => {
   if (!row) return res.status(404).json({ error: 'Candidate not found.' });
   const state = JSON.parse(row.state);
   res.json({ report: buildCandidateReport(row, state) });
+});
+
+// ---- Shortlist decision (advance to interview scheduling, or reject) ----
+// This only records the decision — it does not send the candidate anything.
+// The candidate's own client picks it up and advances itself (or shows a
+// rejection message) next time it checks in from the shortlist stage.
+router.post('/candidates/:id/shortlist', async (req, res) => {
+  const row = await selectById(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Candidate not found.' });
+  const decision = req.body && req.body.decision;
+  if (!['advance', 'reject'].includes(decision)) {
+    return res.status(400).json({ error: 'decision must be "advance" or "reject".' });
+  }
+
+  const state = JSON.parse(row.state);
+  state.shortlist = { decision, decidedAt: new Date().toISOString() };
+
+  const derived = deriveRosterFields(state);
+  await pool.query(
+    `UPDATE candidates SET current_stage=$1, completed_count=$2, flags_total=$3, state=$4, updated_at=$5 WHERE id=$6`,
+    [derived.currentStage, derived.completedCount, derived.flagsTotal, JSON.stringify(state), new Date().toISOString(), row.id]
+  );
+  res.json({ ok: true });
 });
 
 // ---- Unlock a locked section ----
@@ -158,6 +183,7 @@ router.get('/roster/export', async (req, res) => {
     { label: 'Essay Word Count', value: (r) => (r.state.essay ? r.state.essay.wordCount : '') },
     { label: 'Case Study Word Count', value: (r) => (r.state.casestudy ? r.state.casestudy.wordCount : '') },
     { label: 'Demo Video Link', value: (r) => (r.state.demoVideo ? r.state.demoVideo.url : '') },
+    { label: 'Shortlist Decision', value: (r) => (r.state.shortlist ? r.state.shortlist.decision : '') },
     { label: 'Consent Given', value: (r) => (r.state.consent ? 'Yes' : 'No') },
     { label: 'Consent At', value: (r) => (r.state.consent ? r.state.consent.agreedAt : '') },
     { label: 'Interview Day', value: (r) => (r.state.interview ? `${r.state.interview.dow} ${r.state.interview.display}` : '') },
@@ -225,6 +251,9 @@ router.get('/candidates/:id/export', async (req, res) => {
     rows.push({ section: 'Demo Video', item: 'Link', response: report.demoVideo.url, correct: '', result: report.demoVideo.notes || '' });
   }
   rows.push({ section: 'Consent', item: 'Consent given', response: report.consent ? 'Yes' : 'No', correct: '', result: report.consent ? report.consent.agreedAt : '' });
+  if (report.shortlist) {
+    rows.push({ section: 'Shortlist', item: 'Decision', response: report.shortlist.decision, correct: '', result: report.shortlist.decidedAt });
+  }
   const columns = [
     { label: 'Section', value: (r) => r.section },
     { label: 'Item', value: (r) => r.item },

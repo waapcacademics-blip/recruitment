@@ -21,13 +21,14 @@ const STAGE_IDS = [
   'essay',
   'casestudy',
   'video',
+  'shortlist',
   'schedule',
   'hr',
   'board',
   'complete',
 ];
 
-const LEGACY_STAGE_IDS = STAGE_IDS.filter((id) => id !== 'consent' && id !== 'video');
+const LEGACY_STAGE_IDS = STAGE_IDS.filter((id) => id !== 'consent' && id !== 'video' && id !== 'shortlist');
 
 // Mirrors stagesFor() in public/app.js — legacy candidates (state.completed
 // has no 'consent' key) never see the new stages, so their total-stage count

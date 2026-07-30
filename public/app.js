@@ -17,6 +17,7 @@ const STAGES = [
   { id:'essay',           label:'Essay Writing',           sub:'Teaching philosophy',                   type:'essay' },
   { id:'casestudy',       label:'Case Study',              sub:'International students scenario',       type:'case' },
   { id:'video',           label:'Teaching Demo Video',     sub:'~5 minute video link',                  type:'video' },
+  { id:'shortlist',       label:'Application Review',      sub:'Human review before interview',          type:'shortlist' },
   { id:'schedule',        label:'Interview Scheduling',    sub:'Pick your interview day',                type:'calendar' },
   { id:'hr',              label:'HR Interview',            sub:'Orientation & fit',                      type:'hr' },
   { id:'board',           label:'Board Interview',         sub:'Final panel round',                      type:'board' },
@@ -32,7 +33,7 @@ const STAGES = [
 function stagesFor(c){
   if(!c || !c.completed) return STAGES;
   const isLegacy = !Object.prototype.hasOwnProperty.call(c.completed, 'consent');
-  return isLegacy ? STAGES.filter(s => s.id !== 'consent' && s.id !== 'video') : STAGES;
+  return isLegacy ? STAGES.filter(s => s.id !== 'consent' && s.id !== 'video' && s.id !== 'shortlist') : STAGES;
 }
 
 const PASS_THRESHOLD = 0.7;
@@ -116,6 +117,12 @@ async function apiAdminUnlock(id, stageId){
   await fetch(`/api/admin/candidates/${id}/unlock`, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ stageId }),
+  });
+}
+async function apiAdminShortlistDecision(id, decision){
+  await fetch(`/api/admin/candidates/${id}/shortlist`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ decision }),
   });
 }
 async function apiAdminInvite(name, email){
@@ -531,6 +538,7 @@ function renderStageBody(){
     case 'essay': host.innerHTML = renderLongformStage(s); bindLongformStage(s); break;
     case 'case': host.innerHTML = renderLongformStage(s); bindLongformStage(s); break;
     case 'video': host.innerHTML = renderVideoStage(s); bindVideoStage(s); break;
+    case 'shortlist': host.innerHTML = renderShortlistStage(s); bindShortlistStage(s); break;
     case 'calendar': host.innerHTML = renderCalendarStage(s); bindCalendarStage(s); break;
     case 'hr': host.innerHTML = renderHrStage(s); bindHrStage(s); break;
     case 'board': host.innerHTML = renderBoardStage(s); bindBoardStage(s); break;
@@ -651,6 +659,70 @@ function bindVideoStage(s){
     draft = {};
     await saveCandidate();
     toast('Video link submitted and saved.');
+    render();
+  };
+}
+
+/* ---------------- Human shortlist review stage ----------------
+   No action for the candidate to take here — this just waits for HR to
+   record a decision (from the roster/candidate detail view). "Check again"
+   re-fetches the candidate's own state; if HR has since advanced them, this
+   also applies the decision (marks the stage complete and moves on) without
+   requiring another click. A rejection is terminal — there's nothing further
+   to do or check. */
+function renderShortlistStage(s){
+  const decision = candidate.shortlist && candidate.shortlist.decision;
+  if(decision === 'reject'){
+    return `
+      <div class="card">
+        <div class="stage-head">
+          <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
+          <h2>${s.label}</h2>
+        </div>
+        <p class="stage-desc">Thank you for the time and care you put into this application. After review, we won't be moving forward with your application on this occasion. We're grateful for your interest in ${SCHOOL_NAME} and wish you the best in your search.</p>
+      </div>`;
+  }
+  return `
+    <div class="card">
+      <div class="stage-head">
+        <div class="stage-eyebrow">Stage ${stageIndex(s.id)+1} of ${stagesFor(candidate).length}</div>
+        <h2>${s.label}</h2>
+      </div>
+      <p class="stage-desc">Your application is complete and is now with our hiring team for review. There's nothing further needed from you right now — once a decision is made, checking back here (or clicking below) will move you forward to interview scheduling.</p>
+      <div class="actions">
+        <span></span>
+        <div class="actions-right">
+          <button class="btn secondary" id="btn-check-shortlist">Check again</button>
+        </div>
+      </div>
+    </div>`;
+}
+async function applyShortlistDecision(s, freshCandidate){
+  candidate = freshCandidate;
+  if(candidate.shortlist && candidate.shortlist.decision === 'advance' && !candidate.completed[s.id]){
+    candidate.completed[s.id] = true;
+    const nid = nextStageId(s.id);
+    if(nid) candidate.currentStageId = nid;
+    await saveCandidate();
+  }
+}
+function bindShortlistStage(s){
+  // If HR had already decided before the candidate even arrived here
+  // (e.g. reviewed the case study/video earlier), apply it immediately
+  // rather than waiting for a manual "check again" click.
+  if(candidate.shortlist && candidate.shortlist.decision === 'advance' && !candidate.completed[s.id]){
+    applyShortlistDecision(s, candidate).then(render);
+    return;
+  }
+  const btn = document.getElementById('btn-check-shortlist');
+  if(btn) btn.onclick = async () => {
+    const fresh = await apiLoadCandidate(candidate.email);
+    if(!fresh) return;
+    const hadDecision = fresh.shortlist && fresh.shortlist.decision;
+    await applyShortlistDecision(s, fresh);
+    if(hadDecision === 'advance') toast('Good news — moving you to interview scheduling.');
+    else if(hadDecision === 'reject') toast('A decision has been recorded on your application.');
+    else toast('Still under review — check back later.');
     render();
   };
 }
@@ -1434,7 +1506,7 @@ function renderRosterTable(){
   }
   host.innerHTML = `
     <table class="roster">
-      <thead><tr><th>Candidate</th><th>ID</th><th>Current stage</th><th>Progress</th><th>Scores</th><th>Security</th><th>Last activity</th></tr></thead>
+      <thead><tr><th>Candidate</th><th>ID</th><th>Current stage</th><th>Progress</th><th>Scores</th><th>Decision</th><th>Security</th><th>Last activity</th></tr></thead>
       <tbody>
         ${roster.map(r => {
           const stage = STAGES.find(s => s.id === r.currentStage);
@@ -1454,12 +1526,20 @@ function renderRosterTable(){
             : (flags > 0
                 ? `<span class="pill pending" style="border-color:var(--gold);color:var(--gold-dark);">${flags} flag${flags===1?'':'s'}</span>`
                 : `<span class="pill pass">Clean</span>`);
+          const decision = r.shortlistDecision === 'advance'
+            ? `<span class="pill pass">Advancing</span>`
+            : r.shortlistDecision === 'reject'
+              ? `<span class="pill pending" style="border-color:var(--crimson);color:var(--crimson-dark);">Rejected</span>`
+              : r.awaitingShortlist
+                ? `<span class="pill pending" style="border-color:var(--gold);color:var(--gold-dark);">Pending review</span>`
+                : `<span style="color:var(--ink-soft);font-size:12px;">—</span>`;
           return `<tr data-row-id="${r.id}">
             <td>${escapeHtml(r.name)}<br><span style="color:var(--ink-soft);font-size:12px;">${escapeHtml(r.email)}</span></td>
             <td class="mono">${r.candidateId}</td>
             <td>${stage ? stage.label : r.currentStage}</td>
             <td class="mono">${r.completedCount} / ${r.totalStages}</td>
             <td>${scoresSummary}</td>
+            <td>${decision}</td>
             <td>${security}</td>
             <td style="color:var(--ink-soft);font-size:12.5px;">${updated.toLocaleDateString()} ${updated.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</td>
           </tr>`;
@@ -1572,6 +1652,21 @@ function renderCandidateDetail(){
             : `<p class="stage-desc">Not yet submitted.</p>`}
         </div>
 
+        ${r.demoVideo ? `
+        <div class="detail-section">
+          <h3>Shortlist Decision</h3>
+          <p class="stage-desc" style="margin-bottom:12px;">
+            ${r.shortlist
+              ? `Current decision: <strong>${r.shortlist.decision === 'advance' ? 'Advance to interview' : 'Rejected'}</strong> (${new Date(r.shortlist.decidedAt).toLocaleString()}). You can change this below if needed.`
+              : `Awaiting your decision — the candidate sees a "your application is under review" screen until you choose one of the options below.`}
+          </p>
+          <div style="display:flex;gap:10px;">
+            <button class="btn gold" id="btn-shortlist-advance" ${r.shortlist && r.shortlist.decision === 'advance' ? 'disabled' : ''}>Advance to interview</button>
+            <button class="btn secondary" id="btn-shortlist-reject" style="border-color:var(--crimson);color:var(--crimson-dark);" ${r.shortlist && r.shortlist.decision === 'reject' ? 'disabled' : ''}>Reject application</button>
+          </div>
+        </div>
+        ` : ''}
+
         <div class="detail-section">
           <h3>Interview & Confirmations</h3>
           <p class="stage-desc" style="margin-bottom:6px;">${r.interview ? `${r.interview.dow}, ${r.interview.display} at ${r.interview.slot}` : 'Not yet scheduled.'}</p>
@@ -1590,6 +1685,21 @@ function renderCandidateDetail(){
   document.getElementById('detail-backdrop').addEventListener('click', (e) => {
     if(e.target.id === 'detail-backdrop') closeCandidateDetail();
   });
+
+  const advanceBtn = document.getElementById('btn-shortlist-advance');
+  const rejectBtn = document.getElementById('btn-shortlist-reject');
+  if(advanceBtn) advanceBtn.onclick = async () => {
+    await apiAdminShortlistDecision(r.id, 'advance');
+    toast('Candidate advanced to interview scheduling.');
+    await openCandidateDetail(r.id);
+    refreshRoster();
+  };
+  if(rejectBtn) rejectBtn.onclick = async () => {
+    await apiAdminShortlistDecision(r.id, 'reject');
+    toast('Decision recorded.');
+    await openCandidateDetail(r.id);
+    refreshRoster();
+  };
 }
 
 /* ---------------- Boot ---------------- */
