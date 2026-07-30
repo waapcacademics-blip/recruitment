@@ -166,6 +166,62 @@ function formatClock(totalSeconds){
   return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
 }
 
+/* ---------------- Email drafts (no email server needed) ----------------
+   Builds a mailto: link with a pre-filled subject/body so HR only has to
+   review and hit send from their own mail app — no SMTP setup required.
+   Keep the "reject" wording in sync with rejectionEmailContent() in
+   server/email.js, which is what actually gets sent if SMTP is configured. */
+function buildMailtoUrl(to, subject, body){
+  return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+function inviteEmailDraft(name, email, link){
+  const subject = `Your ${SCHOOL_NAME} Application Link`;
+  const body = `Hello ${name},
+
+Thank you for applying to ${SCHOOL_NAME}. Please use the link below to complete your application, which includes several short assessments, a written response, and interview scheduling:
+
+${link}
+
+Please use this exact link, and do not change the name or email address associated with it. If you need to pause and come back later, simply return to this same link — your progress is saved automatically.
+
+Some sections are timed and monitored for academic integrity (for example, switching tabs or pasting text is logged). Please find a quiet space with a stable internet connection before you begin.
+
+Best regards,
+${SCHOOL_NAME} — Recruitment Team`;
+  return buildMailtoUrl(email, subject, body);
+}
+function advanceEmailDraft(name, email){
+  const subject = `Good news from ${SCHOOL_NAME}`;
+  const body = `Dear ${name},
+
+Thank you for completing your application to ${SCHOOL_NAME}. We're pleased to let you know that your application is moving forward to the interview stage.
+
+Please log back in using your original application link to select your interview day and time — this covers both an HR orientation conversation and a board interview on the same day.
+
+We look forward to speaking with you.
+
+Warm regards,
+${SCHOOL_NAME} — Recruitment Team`;
+  return buildMailtoUrl(email, subject, body);
+}
+function rejectEmailDraft(name, email){
+  const subject = `Your application to ${SCHOOL_NAME}`;
+  const body = `Dear ${name},
+
+Thank you for the time and care you put into your application to ${SCHOOL_NAME}, and for completing every stage of our process.
+
+After careful review, we will not be moving forward with your application at this time. This was a competitive process, and this decision does not reflect a lack of appreciation for your background and experience.
+
+We're grateful for your interest in our school and wish you all the best in your search.
+
+Warm regards,
+${SCHOOL_NAME} — Recruitment Team`;
+  return buildMailtoUrl(email, subject, body);
+}
+function draftEmailButton(label, mailtoUrl, extraStyle){
+  return `<a class="btn secondary" style="${extraStyle||''}" href="${mailtoUrl}">${label}</a>`;
+}
+
 /* ---------------- Crest (WAAPC American School seal) ---------------- */
 function renderCrest(size, idSuffix){
   return `<img class="crest" src="/assets/logo.jpg" alt="${escapeHtml(SCHOOL_NAME)} crest" width="${size}" height="${size}" style="width:${size}px;height:${size}px;object-fit:contain;">`;
@@ -1522,9 +1578,12 @@ function bindAdminShell(){
           ${results.map(r => `
             <div style="padding:9px 12px;border-bottom:1px solid var(--line-soft);font-size:12.5px;display:flex;justify-content:space-between;gap:10px;align-items:center;">
               <span>${escapeHtml(r.name||'')} <span style="color:var(--ink-soft);">${escapeHtml(r.email||'')}</span></span>
-              ${r.status === 'error'
-                ? `<span class="pill pending" style="border-color:var(--crimson);color:var(--crimson-dark);">${escapeHtml(r.error)}</span>`
-                : `<span class="pill ${r.status==='created'?'pass':'pending'}">${r.status === 'created' ? 'Created' : 'Existing'}</span>`}
+              <span style="display:flex;gap:8px;align-items:center;">
+                ${r.status === 'error'
+                  ? `<span class="pill pending" style="border-color:var(--crimson);color:var(--crimson-dark);">${escapeHtml(r.error)}</span>`
+                  : `<span class="pill ${r.status==='created'?'pass':'pending'}">${r.status === 'created' ? 'Created' : 'Existing'}</span>
+                     ${draftEmailButton('Draft email', inviteEmailDraft(r.name, r.email, r.link), 'padding:4px 9px;font-size:11.5px;')}`}
+              </span>
             </div>
           `).join('')}
         </div>`;
@@ -1554,6 +1613,7 @@ function bindAdminShell(){
         <div style="display:flex;gap:8px;margin-top:8px;">
           <input readonly id="invite-link" value="${escapeHtml(link)}" style="flex:1;padding:9px 12px;border:1px solid var(--line);border-radius:3px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;">
           <button class="btn secondary" id="btn-copy-link">Copy</button>
+          ${draftEmailButton('Draft email', inviteEmailDraft(name, email, link))}
         </div>`;
       document.getElementById('btn-copy-link').onclick = () => {
         navigator.clipboard.writeText(link).then(() => toast('Link copied.'));
@@ -1775,14 +1835,21 @@ function renderCandidateDetail(){
             <button class="btn gold" id="btn-shortlist-advance" ${r.shortlist && r.shortlist.decision === 'advance' ? 'disabled' : ''}>Advance to interview</button>
             <button class="btn secondary" id="btn-shortlist-reject" style="border-color:var(--crimson);color:var(--crimson-dark);" ${r.shortlist && r.shortlist.decision === 'reject' ? 'disabled' : ''}>Reject application</button>
           </div>
+          ${r.shortlist && r.shortlist.decision === 'advance' ? `
+            <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line-soft);">
+              ${draftEmailButton('Draft "moving forward" email', advanceEmailDraft(r.name, r.email))}
+              <p class="stage-desc" style="margin-top:8px;margin-bottom:0;font-size:12.5px;">Opens your own mail app with the message pre-filled — review and send from there.</p>
+            </div>
+          ` : ''}
           ${r.shortlist && r.shortlist.decision === 'reject' ? `
             <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line-soft);">
-              ${r.rejectionEmail
-                ? `<p class="stage-desc" style="margin-bottom:0;">✓ Rejection email sent ${new Date(r.rejectionEmail.sentAt).toLocaleString()}.</p>`
-                : `
-                  <button class="btn secondary" id="btn-send-rejection-email" style="border-color:var(--crimson);color:var(--crimson-dark);">Send rejection email to candidate</button>
-                  <p class="stage-desc" style="margin-top:8px;margin-bottom:0;font-size:12.5px;">Sends a brief, generic email — no specific reason is included. This can only be sent once.</p>
-                `}
+              <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                ${draftEmailButton('Draft rejection email', rejectEmailDraft(r.name, r.email), 'border-color:var(--crimson);color:var(--crimson-dark);')}
+                ${r.rejectionEmail
+                  ? `<span class="pill pass">✓ Sent via system email ${new Date(r.rejectionEmail.sentAt).toLocaleString()}</span>`
+                  : `<button class="btn secondary" id="btn-send-rejection-email" style="border-color:var(--crimson);color:var(--crimson-dark);">Send automatically instead (needs email set up)</button>`}
+              </div>
+              <p class="stage-desc" style="margin-top:8px;margin-bottom:0;font-size:12.5px;">The draft opens your own mail app for you to review and send — no setup needed. The automatic option requires email sending to be configured on the server, and can only be used once.</p>
             </div>
           ` : ''}
         </div>
